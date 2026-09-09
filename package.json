@@ -1,0 +1,20 @@
+{
+  "name": "log-record-splitter",
+  "version": "0.1.0",
+  "description": "Split raw log text into logical records, keeping multi-line entries like stack traces intact",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist"
+  },
+  "license": "MIT",
+  "author": "lisam431",
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
