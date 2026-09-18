@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitRecords } from "./index.js";
+import { splitRecords, streamRecords } from "./index.js";
 import { syslogPattern, epochMillisPattern, isoPattern } from "./timestamps.js";
+
+async function* asChunks(pieces: string[]): AsyncGenerator<string> {
+  for (const piece of pieces) yield piece;
+}
+
+async function collect(chunks: string[], referenceYear = 2024) {
+  const records = [];
+  for await (const record of streamRecords(asChunks(chunks), { referenceYear })) {
+    records.push(record);
+  }
+  return records;
+}
 
 interface SplitCase {
   name: string;
@@ -137,6 +149,62 @@ test("splitRecords", async (t) => {
       });
     });
   }
+});
+
+test("streamRecords", async (t) => {
+  for (const testCase of splitCases) {
+    await t.test(testCase.name, async () => {
+      const records = await collect([testCase.input]);
+      assert.equal(records.length, testCase.expected.length);
+      records.forEach((record, index) => {
+        const expected = testCase.expected[index];
+        assert.ok(expected, `unexpected extra record at index ${index}`);
+        assert.equal(
+          record.timestamp ? record.timestamp.toISOString() : null,
+          expected.timestamp,
+          `timestamp mismatch for record ${index}`,
+        );
+        assert.deepEqual(record.lines, expected.lines, `lines mismatch for record ${index}`);
+      });
+    });
+  }
+
+  await t.test("agrees with splitRecords when fed one character at a time", async () => {
+    const input = [
+      "2024-01-02T10:00:00Z ERROR something broke",
+      "java.lang.RuntimeException: boom",
+      "    at com.example.Main.run(Main.java:42)",
+      "2024-01-02T10:00:05Z INFO recovered",
+      "",
+    ].join("\n");
+    const whole = splitRecords(input, { referenceYear: REFERENCE_YEAR });
+    const streamed = await collect(input.split(""));
+    assert.deepEqual(
+      streamed.map((r) => r.lines),
+      whole.map((r) => r.lines),
+    );
+  });
+
+  await t.test("a CRLF terminator split across a chunk boundary is not treated as two lines", async () => {
+    const records = await collect([
+      "2024-01-02T10:00:00Z INFO a\r",
+      "\n2024-01-02T10:00:01Z INFO b\r\n",
+    ]);
+    assert.deepEqual(
+      records.map((r) => r.lines),
+      [["2024-01-02T10:00:00Z INFO a"], ["2024-01-02T10:00:01Z INFO b"]],
+    );
+  });
+
+  await t.test("a timestamp split across a chunk boundary is still recognized", async () => {
+    const records = await collect(["2024-01-02T10:00", ":00Z INFO late arrival\n"]);
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.timestamp?.toISOString(), "2024-01-02T10:00:00.000Z");
+  });
+
+  await t.test("no chunks produces no records", async () => {
+    assert.deepEqual(await collect([]), []);
+  });
 });
 
 interface PatternCase {

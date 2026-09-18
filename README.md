@@ -62,6 +62,29 @@ splitRecords(text, { referenceYear: 2024 });
 
 Without it, the current calendar year is assumed.
 
+## Streaming large files
+
+`splitRecords` needs the whole file in memory as one string. For input too
+large for that, `streamRecords` takes an (async) iterable of text chunks and
+yields records as they're completed, holding at most one record's worth of
+lines in memory at a time:
+
+```ts
+import { createReadStream } from "node:fs";
+import { streamRecords } from "./src/index.js";
+
+const chunks = createReadStream("app.log", "utf8");
+for await (const record of streamRecords(chunks)) {
+  console.log(record.timestamp?.toISOString() ?? "(no timestamp)", "->", record.lines.length, "line(s)");
+}
+```
+
+It accepts the same `SplitOptions` as `splitRecords` and applies the same
+grouping rule. A line terminator that happens to fall across a chunk
+boundary (a `\r` at the very end of one chunk followed by `\n` at the start
+of the next) is still recognized as a single `\r\n`, and a timestamp itself
+can straddle a chunk boundary without being missed.
+
 You can also supply your own pattern list and skip the built-ins entirely:
 
 ```ts
