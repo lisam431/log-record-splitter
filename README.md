@@ -47,12 +47,15 @@ to the 10:00:00 entry, and a single-line record for 10:00:05.
 
 ## Timestamp formats
 
-Four formats are recognized out of the box:
+Five formats are recognized out of the box:
 
 - ISO 8601 — `2024-01-02T10:00:00.123Z`, `2024-01-02 10:00:00+02:00`
 - Bracketed — `[2024-01-02 10:00:00.123]`
 - Syslog — `Jan  2 03:04:05` (no year in the format itself — see below)
 - Epoch milliseconds — a bare 13-digit number at the start of a line
+- JSON — a single JSON object per line (as most structured loggers emit),
+  with the timestamp read from a `@timestamp`, `timestamp`, `time`, or `ts`
+  field, as an ISO string or epoch seconds/milliseconds: `{"time":"2024-01-02T10:00:00Z","level":"info","msg":"listening"}`
 
 Syslog timestamps don't carry a year, so `splitRecords` needs one from you:
 

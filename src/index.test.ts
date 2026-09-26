@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { splitRecords, streamRecords } from "./index.js";
-import { syslogPattern, epochMillisPattern, isoPattern } from "./timestamps.js";
+import { syslogPattern, epochMillisPattern, isoPattern, jsonPattern } from "./timestamps.js";
 
 async function* asChunks(pieces: string[]): AsyncGenerator<string> {
   for (const piece of pieces) yield piece;
@@ -129,6 +129,24 @@ const splitCases: SplitCase[] = [
       { timestamp: "2024-01-02T09:00:02.000Z", lines: ["2024-01-02T09:00:02Z INFO listening"] },
     ],
   },
+  {
+    name: "JSON lines are recognized as structured log records",
+    input: [
+      '{"time":"2024-01-02T10:00:00Z","level":"info","msg":"listening"}',
+      '{"time":"2024-01-02T10:00:01Z","level":"error","msg":"boom","stack":"at foo (bar.js:1)"}',
+      "",
+    ].join("\n"),
+    expected: [
+      {
+        timestamp: "2024-01-02T10:00:00.000Z",
+        lines: ['{"time":"2024-01-02T10:00:00Z","level":"info","msg":"listening"}'],
+      },
+      {
+        timestamp: "2024-01-02T10:00:01.000Z",
+        lines: ['{"time":"2024-01-02T10:00:01Z","level":"error","msg":"boom","stack":"at foo (bar.js:1)"}'],
+      },
+    ],
+  },
 ];
 
 test("splitRecords", async (t) => {
@@ -238,6 +256,41 @@ const syslogCases: PatternCase[] = [
 test("syslogPattern edge cases", () => {
   const pattern = syslogPattern(REFERENCE_YEAR);
   for (const patternCase of syslogCases) {
+    const match = patternCase.line.match(pattern.regex);
+    const result = match ? pattern.parse(match) : null;
+    assert.equal(result !== null, patternCase.expectMatch, patternCase.name);
+  }
+});
+
+const jsonCases: PatternCase[] = [
+  { name: "iso string in a time field", line: '{"time":"2024-01-02T10:00:00Z","msg":"hi"}', expectMatch: true },
+  {
+    name: "epoch millis in a ts field",
+    line: `{"ts":${Date.UTC(2024, 0, 2, 10, 0, 0)},"msg":"hi"}`,
+    expectMatch: true,
+  },
+  {
+    name: "epoch seconds in a ts field",
+    line: `{"ts":${Date.UTC(2024, 0, 2, 10, 0, 0) / 1000},"msg":"hi"}`,
+    expectMatch: true,
+  },
+  {
+    name: "@timestamp is preferred over a less specific timestamp field",
+    line: '{"@timestamp":"2024-01-02T10:00:00Z","timestamp":"not a date"}',
+    expectMatch: true,
+  },
+  { name: "no recognized timestamp field", line: '{"level":"info","msg":"hi"}', expectMatch: false },
+  {
+    name: "malformed json (trailing comma) is rejected despite matching the line shape",
+    line: '{"time":"2024-01-02T10:00:00Z",}',
+    expectMatch: false,
+  },
+  { name: "a time field that isn't a valid date is rejected", line: '{"time":"not a date","msg":"hi"}', expectMatch: false },
+];
+
+test("jsonPattern edge cases", () => {
+  const pattern = jsonPattern();
+  for (const patternCase of jsonCases) {
     const match = patternCase.line.match(pattern.regex);
     const result = match ? pattern.parse(match) : null;
     assert.equal(result !== null, patternCase.expectMatch, patternCase.name);

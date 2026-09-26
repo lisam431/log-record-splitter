@@ -80,8 +80,63 @@ export function epochMillisPattern(): TimestampPattern {
   };
 }
 
+const JSON_TIMESTAMP_KEYS = ["@timestamp", "timestamp", "time", "ts"];
+
+function parseDateStringField(value: string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Structured loggers (pino, bunyan, zap, ...) often emit the time as
+// seconds rather than milliseconds, so a value under this threshold is
+// assumed to be seconds and scaled up.
+function parseNumericTimestamp(value: number): Date | null {
+  const millis = value < 1e12 ? value * 1000 : value;
+  const date = new Date(millis);
+  const year = date.getUTCFullYear();
+  if (year < 2000 || year > 2100) return null;
+  return date;
+}
+
+// One JSON object per line, as emitted by most structured loggers. The
+// timestamp lives in a field rather than at a fixed position, so unlike the
+// other patterns this one has to actually parse the line to find it. Field
+// name and shape (ISO string vs. epoch seconds/millis) vary by logger, so a
+// handful of common field names are tried in priority order.
+export function jsonPattern(): TimestampPattern {
+  return {
+    name: "json",
+    regex: /^\{.*\}\s*$/,
+    parse: (match) => {
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+      for (const key of JSON_TIMESTAMP_KEYS) {
+        const field = record[key];
+        if (typeof field === "string") {
+          const date = parseDateStringField(field);
+          if (date) return date;
+        } else if (typeof field === "number") {
+          const date = parseNumericTimestamp(field);
+          if (date) return date;
+        }
+      }
+      return null;
+    },
+  };
+}
+
 export function defaultPatterns(
   referenceYear: number = new Date().getFullYear(),
 ): TimestampPattern[] {
-  return [isoPattern(), bracketedPattern(), syslogPattern(referenceYear), epochMillisPattern()];
+  return [
+    isoPattern(),
+    bracketedPattern(),
+    syslogPattern(referenceYear),
+    epochMillisPattern(),
+    jsonPattern(),
+  ];
 }
